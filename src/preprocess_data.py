@@ -1,6 +1,49 @@
 from pathlib import Path
 import pandas as pd
-from utils import preprocess_sequence_data, save_pickle, load_pickle
+from utils import save_pickle
+from tqdm import tqdm
+import numpy as np
+
+
+def preprocess_sequence_data(sequences_df, labels_df=None, is_train=True):
+    """
+    Preprocess RNA sequence data.
+    Convert sequences to numerical form and normalize coordinate targets per sequence.
+    """
+    nucleotide_map = {'A': 0, 'C': 1, 'G': 2, 'U': 3, 'T': 3}
+    processed_data = []
+
+    for idx, row in tqdm(sequences_df.iterrows()):
+        seq_id = row['target_id']
+        sequence = row['sequence']
+        numerical_seq = [nucleotide_map.get(nuc, 4) for nuc in sequence]
+
+        structures = None
+        if is_train and labels_df is not None:
+            sequence_labels = labels_df[labels_df['ID'].str.startswith(
+                seq_id + '_')]
+            if not sequence_labels.empty:
+                num_structures = (len(sequence_labels.columns) - 3) // 3
+                structures = []
+                for i in range(1, num_structures + 1):
+                    coords = []
+                    for _, label_row in sequence_labels.iterrows():
+                        x = label_row[f'x_{i}']
+                        y = label_row[f'y_{i}']
+                        z = label_row[f'z_{i}']
+                        coords.append([x, y, z])
+                    coords = np.array(coords)
+                    # Normalize coordinates per sequence (center and scale)
+                    mean = np.mean(coords, axis=0)
+                    std = np.std(coords, axis=0) + 1e-8
+                    coords_norm = (coords - mean) / std
+                    structures.append(coords_norm)
+        processed_data.append({
+            'id': seq_id,
+            'sequence': numerical_seq,
+            'structures': structures
+        })
+    return processed_data
 
 
 if __name__ == "__main__":
@@ -14,10 +57,6 @@ if __name__ == "__main__":
     test_sequences = pd.read_csv(path/'test_sequences.csv')
     sample_submission = pd.read_csv(path/'sample_submission.csv')
 
-    # n_sample = 50
-    # train_sequences = train_sequences.sample(n_sample)
-    # train_labels = train_labels.sample(n_sample)
-    # Fill missing coordinate values to avoid NaNs.
     train_labels.fillna(0, inplace=True)
     validation_labels.fillna(0, inplace=True)
 
@@ -34,27 +73,12 @@ if __name__ == "__main__":
     valid_preprocessed_data = path/"preprocessed_valid.pkl"
     test_preprocessed_data = path/"preprocessed_test.pkl"
 
-    if train_preprocessed_data.exists():
-        print("Loading cached training data...")
-        train_data = load_pickle(train_preprocessed_data)
-    else:
-        print("Processing and caching training data...")
-        train_data = preprocess_sequence_data(train_sequences, train_labels)
-        save_pickle(train_data, train_preprocessed_data)
+    train_data = preprocess_sequence_data(train_sequences, train_labels)
+    save_pickle(train_data, train_preprocessed_data)
 
-    if valid_preprocessed_data.exists():
-        print("Loading cached validation data...")
-        validation_data = load_pickle(valid_preprocessed_data)
-    else:
-        print("Processing and caching validation data...")
-        validation_data = preprocess_sequence_data(
-            validation_sequences, validation_labels)
-        save_pickle(validation_data, valid_preprocessed_data)
+    validation_data = preprocess_sequence_data(
+        validation_sequences, validation_labels)
+    save_pickle(validation_data, valid_preprocessed_data)
 
-    if test_preprocessed_data.exists():
-        print("Loading cached test data...")
-        test_data = load_pickle(test_preprocessed_data)
-    else:
-        print("Processing and caching test data...")
-        test_data = preprocess_sequence_data(test_sequences, is_train=False)
-        save_pickle(test_data, test_preprocessed_data)
+    test_data = preprocess_sequence_data(test_sequences, is_train=False)
+    save_pickle(test_data, test_preprocessed_data)

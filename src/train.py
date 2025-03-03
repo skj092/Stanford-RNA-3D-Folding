@@ -1,19 +1,16 @@
 # Stanford RNA 3D Folding Competition
 # Revised Notebook for RNA 3D Structure Prediction (Improved V3)
 
-from utils import generate_predictions, visualize_3d_structure, create_submission_file
 from model import RNAFoldingModel
 from dataset import RNADataset, collate_fn
-from utils import preprocess_sequence_data, extract_sequence_features, enhance_features_with_ss
-import pandas as pd
-import matplotlib.pyplot as plt
+from utils import extract_sequence_features, enhance_features_with_ss
 import torch
 import torch.optim as optim
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader
 import warnings
 from pathlib import Path
 from engine import (train_epoch, validate,
-                    calculate_tm_score, evaluate_model)
+                    evaluate_model)
 from utils import load_pickle
 warnings.filterwarnings('ignore')
 

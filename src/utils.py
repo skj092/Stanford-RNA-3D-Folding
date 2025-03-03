@@ -1,49 +1,7 @@
 import pandas as pd
 import torch
 import numpy as np
-from tqdm import tqdm
 import pickle
-
-
-def preprocess_sequence_data(sequences_df, labels_df=None, is_train=True):
-    """
-    Preprocess RNA sequence data.
-    Convert sequences to numerical form and normalize coordinate targets per sequence.
-    """
-    nucleotide_map = {'A': 0, 'C': 1, 'G': 2, 'U': 3, 'T': 3}
-    processed_data = []
-
-    for idx, row in tqdm(sequences_df.iterrows()):
-        seq_id = row['target_id']
-        sequence = row['sequence']
-        numerical_seq = [nucleotide_map.get(nuc, 4) for nuc in sequence]
-
-        structures = None
-        if is_train and labels_df is not None:
-            sequence_labels = labels_df[labels_df['ID'].str.startswith(
-                seq_id + '_')]
-            if not sequence_labels.empty:
-                num_structures = (len(sequence_labels.columns) - 3) // 3
-                structures = []
-                for i in range(1, num_structures + 1):
-                    coords = []
-                    for _, label_row in sequence_labels.iterrows():
-                        x = label_row[f'x_{i}']
-                        y = label_row[f'y_{i}']
-                        z = label_row[f'z_{i}']
-                        coords.append([x, y, z])
-                    coords = np.array(coords)
-                    # Normalize coordinates per sequence (center and scale)
-                    mean = np.mean(coords, axis=0)
-                    std = np.std(coords, axis=0) + 1e-8
-                    coords_norm = (coords - mean) / std
-                    structures.append(coords_norm)
-        processed_data.append({
-            'id': seq_id,
-            'sequence': numerical_seq,
-            'structures': structures
-        })
-    return processed_data
 
 
 # 4. Feature Engineering
