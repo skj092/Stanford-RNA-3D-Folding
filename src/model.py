@@ -1,31 +1,50 @@
-import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader
-from transformers import BertModel, BertConfig
+import torch
 
 
-class RNA3DTransformer(nn.Module):
-    def __init__(self, vocab_size=5, hidden_dim=256, num_layers=4, num_heads=8):
-        super(RNA3DTransformer, self).__init__()
-
-        self.embedding = nn.Embedding(vocab_size, hidden_dim)
-        self.encoder_layer = nn.TransformerEncoderLayer(
-            d_model=hidden_dim, nhead=num_heads, dim_feedforward=hidden_dim * 4
+# 7. Model Architecture with BatchNorm and increased capacity
+class RNAFoldingModel(nn.Module):
+    def __init__(self, input_dim, hidden_dim=256, num_layers=3, dropout=0.3):
+        super(RNAFoldingModel, self).__init__()
+        self.hidden_dim = hidden_dim
+        self.lstm = nn.LSTM(
+            input_dim,
+            hidden_dim,
+            num_layers=num_layers,
+            bidirectional=True,
+            batch_first=True,
+            dropout=dropout
         )
-        self.transformer = nn.TransformerEncoder(
-            self.encoder_layer, num_layers=num_layers)
+        self.attention = nn.Linear(hidden_dim * 2, 1)
+        self.fc1 = nn.Linear(hidden_dim * 2, hidden_dim)
+        self.bn1 = nn.BatchNorm1d(hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim, hidden_dim // 2)
+        self.bn2 = nn.BatchNorm1d(hidden_dim // 2)
+        self.fc3 = nn.Linear(hidden_dim // 2, 3)  # 3D coordinates
+        self.dropout = nn.Dropout(dropout)
+        self.relu = nn.ReLU()
 
-        # Predict 3D coordinates
-        self.regressor = nn.Linear(hidden_dim, 3)
-
-    def forward(self, x):
-        x = self.embedding(x)  # Convert sequence tokens to embeddings
-        x = self.transformer(x)  # Pass through Transformer Encoder
-        xyz = self.regressor(x)  # Predict 3D coordinates
-        return xyz
-
-
-if __name__ == "__main__":
-    # Define model
-    model = RNA3DTransformer()
-    print(model)
+    def forward(self, x, seq_lengths=None):
+        batch_size, seq_len, _ = x.size()
+        if seq_lengths is not None:
+            packed_input = nn.utils.rnn.pack_padded_sequence(
+                x, seq_lengths, batch_first=True, enforce_sorted=True)
+            packed_output, _ = self.lstm(packed_input)
+            lstm_out, _ = nn.utils.rnn.pad_packed_sequence(
+                packed_output, batch_first=True)
+        else:
+            lstm_out, _ = self.lstm(x)
+        attention_scores = self.attention(lstm_out)
+        attention_weights = torch.softmax(attention_scores, dim=1)
+        context_vector = torch.sum(lstm_out * attention_weights, dim=1)
+        context_vector = context_vector.unsqueeze(1).expand(-1, seq_len, -1)
+        combined = lstm_out + context_vector
+        x = self.relu(self.fc1(combined))
+        # BatchNorm expects input as (B, C, L), so transpose, apply, then transpose back
+        x = self.bn1(x.transpose(1, 2)).transpose(1, 2)
+        x = self.dropout(x)
+        x = self.relu(self.fc2(x))
+        x = self.bn2(x.transpose(1, 2)).transpose(1, 2)
+        x = self.dropout(x)
+        x = self.fc3(x)
+        return x

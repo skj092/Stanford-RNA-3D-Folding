@@ -1,72 +1,60 @@
 from pathlib import Path
-import pickle
 import pandas as pd
-from tqdm import tqdm
-import numpy as np
-from utils import config
+from utils import preprocess_sequence_data, save_pickle, load_pickle
 
-path = Path('data')
-train_sequences = pd.read_csv(path / "train_sequences.csv")  # (844, 5)
-train_labels = pd.read_csv(path / "train_labels.csv")  # (137095, 7)
-train_labels["pdb_id"] = train_labels["ID"].apply(lambda x: x.split("_")[0] + '_' + x.split("_")[1])
 
-cache_file = path / "processed_data.pkl"
+if __name__ == "__main__":
+    # 1. Data Loading and Exploration
+    print("Loading datasets...")
+    path = Path('data')
+    train_sequences = pd.read_csv(path/'train_sequences.csv')
+    train_labels = pd.read_csv(path/'train_labels.csv')
+    validation_sequences = pd.read_csv(path/'validation_sequences.csv')
+    validation_labels = pd.read_csv(path/'validation_labels.csv')
+    test_sequences = pd.read_csv(path/'test_sequences.csv')
+    sample_submission = pd.read_csv(path/'sample_submission.csv')
 
-print("Processing dataset...")
+    # n_sample = 50
+    # train_sequences = train_sequences.sample(n_sample)
+    # train_labels = train_labels.sample(n_sample)
+    # Fill missing coordinate values to avoid NaNs.
+    train_labels.fillna(0, inplace=True)
+    validation_labels.fillna(0, inplace=True)
 
-all_xyz = []
-for pdb_id in tqdm(train_sequences['target_id']):
-    df = train_labels[train_labels["pdb_id"] == pdb_id]
-    xyz = df[['x_1', 'y_1', 'z_1']].to_numpy().astype('float32')
+    print("\nBasic dataset information:")
+    print(f"Training sequences: {train_sequences.shape}")
+    print(f"Training labels: {train_labels.shape}")
+    print(f"Validation sequences: {validation_sequences.shape}")
+    print(f"Validation labels: {validation_labels.shape}")
+    print(f"Test sequences: {test_sequences.shape}")
+    print(f"Sample submission: {sample_submission.shape}")
 
-    xyz[xyz < -1e17] = float('Nan')  # Handle invalid values
-    all_xyz.append(xyz)
+    print("Preprocessing training data...")
+    train_preprocessed_data = path/"preprocessed_train.pkl"
+    valid_preprocessed_data = path/"preprocessed_valid.pkl"
+    test_preprocessed_data = path/"preprocessed_test.pkl"
 
-# **Log original scale**
-xyz_all = np.vstack([xyz for xyz in all_xyz if len(xyz) > 0])
-mean_xyz = np.nanmean(xyz_all, axis=0)
-std_xyz = np.nanstd(xyz_all, axis=0)
+    if train_preprocessed_data.exists():
+        print("Loading cached training data...")
+        train_data = load_pickle(train_preprocessed_data)
+    else:
+        print("Processing and caching training data...")
+        train_data = preprocess_sequence_data(train_sequences, train_labels)
+        save_pickle(train_data, train_preprocessed_data)
 
-print(f"Before Normalization:\nMean: {mean_xyz}, Std: {std_xyz}")
+    if valid_preprocessed_data.exists():
+        print("Loading cached validation data...")
+        validation_data = load_pickle(valid_preprocessed_data)
+    else:
+        print("Processing and caching validation data...")
+        validation_data = preprocess_sequence_data(
+            validation_sequences, validation_labels)
+        save_pickle(validation_data, valid_preprocessed_data)
 
-# **Normalize XYZ**
-all_xyz = [(xyz - mean_xyz) / (std_xyz + 1e-6) for xyz in all_xyz]
-
-# **Log normalized scale**
-xyz_all_norm = np.vstack([xyz for xyz in all_xyz if len(xyz) > 0])
-mean_xyz_norm = np.nanmean(xyz_all_norm, axis=0)
-std_xyz_norm = np.nanstd(xyz_all_norm, axis=0)
-
-print(f"After Normalization:\nMean: {mean_xyz_norm}, Std: {std_xyz_norm}")
-
-# Filter sequences
-filter_nan = []
-max_len = 0
-for xyz in all_xyz:
-    if len(xyz) > max_len:
-        max_len = len(xyz)
-    filter_nan.append((np.isnan(xyz).mean() <= 0.5) &
-                      (len(xyz) < config['max_len_filter']) &
-                      (len(xyz) > config['min_len_filter']))
-
-print(f"Longest sequence in train: {max_len}")
-
-filter_nan = np.array(filter_nan)
-non_nan_indices = np.arange(len(filter_nan))[filter_nan]
-
-train_sequences = train_sequences.loc[non_nan_indices].reset_index(drop=True)
-all_xyz = [all_xyz[i] for i in non_nan_indices]
-
-data = {
-    "sequence": train_sequences['sequence'].to_list(),
-    "temporal_cutoff": train_sequences['temporal_cutoff'].to_list(),
-    "description": train_sequences['description'].to_list(),
-    "all_sequences": train_sequences['all_sequences'].to_list(),
-    "xyz": all_xyz
-}
-
-with open(cache_file, "wb") as f:
-    pickle.dump(data, f)
-
-print("Preprocessed data saved.")
-
+    if test_preprocessed_data.exists():
+        print("Loading cached test data...")
+        test_data = load_pickle(test_preprocessed_data)
+    else:
+        print("Processing and caching test data...")
+        test_data = preprocess_sequence_data(test_sequences, is_train=False)
+        save_pickle(test_data, test_preprocessed_data)
